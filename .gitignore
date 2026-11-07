@@ -6,4 +6,5 @@ kernel2opt1
 kernel2opt2
 kernel3opt1
 kernel3opt2
-output/
+output/*
+!output/.gitkeep
