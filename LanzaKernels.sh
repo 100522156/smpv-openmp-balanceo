@@ -40,6 +40,11 @@ echo "Nodo: $(hostname) | Trabajo: $SLURM_JOB_ID | Matriz: $MATRIZ | Kernels: $K
 gcc -o kernel1 kernel1.c -lm -fopenmp -O0
 gcc -o kernel2 kernel2.c -lm -fopenmp -O0
 gcc -o kernel3 kernel3.c -lm -fopenmp -O0
+# versiones optimizadas del apartado 4.5, con las mismas opciones de compilacion
+gcc -o kernel2opt1 kernel2opt1.c -lm -fopenmp -O0
+gcc -o kernel3opt1 kernel3opt1.c -lm -fopenmp -O0
+gcc -o kernel2opt2 kernel2opt2.c -lm -fopenmp -O0
+gcc -o kernel3opt2 kernel3opt2.c -lm -fopenmp -O0
 
 # Que bash imprima solo los segundos reales del programa completo
 TIMEFORMAT="%R"

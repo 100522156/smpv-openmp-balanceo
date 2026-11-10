@@ -157,10 +157,10 @@ static long long perf_l1_parar(int fd) {
 // schedule del bucle de columnas. no se calculan cortes ni se usa col_ptr para
 // repartir; es openmp quien decide en tiempo de ejecucion que columnas hace cada hilo.
 //
-// se usa schedule(runtime) para que la politica de reparto se elija con la variable
-// de entorno omp_schedule sin recompilar (por ejemplo "dynamic,64", "guided,64" o
-// "static,64"). asi el script puede comparar varias politicas con el mismo binario;
-// la que resulte mejor con la matriz del equipo se deja fija en la version final.
+// la politica se eligio experimentalmente: durante las pruebas se uso
+// schedule(runtime) para variar el reparto con la variable omp_schedule sin
+// recompilar (con el script de pruebas de schedule), y la version final deja fija
+// la mas rapida.
 
 // 3. spmv openmp atomic con balanceo de openmp (opt2)
 // igual que en kernel3.c, recibe dos parametros de salida para devolver lo medido
@@ -193,13 +193,16 @@ void spmv_csc_openmp_atomic(const CSCMatrix *mat, const double *x, double *y,
         // que es lo que importa para ver si un hilo hace esperar a los demas
         double t_ini = omp_get_wtime();
 
-        // unico cambio respecto al original: schedule(runtime) en lugar de
-        // schedule(static). con dynamic o guided cada hilo pide un nuevo paquete de
-        // columnas al terminar el anterior, de modo que los hilos que reciben
-        // columnas ligeras acaban haciendo mas paquetes y la carga se iguala sola.
+        // unico cambio respecto al original: schedule(dynamic, 64) en lugar de
+        // schedule(static). cada hilo pide un nuevo paquete de 64 columnas al terminar
+        // el anterior, de modo que los hilos que reciben columnas ligeras hacen mas
+        // paquetes y la carga se iguala sola. se eligio tras comparar static, static,64,
+        // dynamic (16, 64, 256) y guided (16, 64) con 4, 8 y 16 hilos usando
+        // schedule(runtime): dynamic,64 fue el mas rapido o a menos del 1% del mejor
+        // en todos los casos.
         // el nowait se mantiene: cada hilo termina en cuanto no quedan paquetes,
         // sin esperar a los demas. el atomic de cada suma no cambia
-        #pragma omp for schedule(runtime) nowait
+        #pragma omp for schedule(dynamic, 64) nowait
         for (int j = 0; j < N; j++) {
             double x_j = x[j];
             int start = mat->col_ptr[j];
