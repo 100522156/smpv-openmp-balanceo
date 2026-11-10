@@ -9,7 +9,7 @@
 #SBATCH --error=./output/pruebas_%j.err
 
 # bateria de pruebas de correccion: comprueba que todas las versiones paralelas
-# calculan el mismo vector y que kernel1 (secuencial), que se toma como referencia.
+# calculan el mismo vector y = A*x que kernel1 (secuencial), que se toma como referencia.
 #
 # uso (desde la carpeta del proyecto, despues de python3 pruebas/gen_pruebas.py):
 #   sbatch pruebas/LanzaPruebas.sh                          -> las matrices pruebas/t*.bin
@@ -76,6 +76,12 @@ total=0
 mal=0
 for mat in $MATRICES; do
     echo "== $mat"
+    # si la matriz no existe se avisa y se salta, para no confundirlo con un
+    # kernel que calcula mal
+    if [ ! -f "$mat" ]; then
+        echo "   no existe, se omite"
+        continue
+    fi
     OMP_NUM_THREADS=1 PRUEBA_SALIDA="$TMP/ref" ./pruebas/t_kernel1 "$mat" > /dev/null 2>&1
     filas_ref=$(wc -l < "$TMP/ref")
     for k in $KERNELS; do
