@@ -1,0 +1,73 @@
+# Proyecto AC: balanceo de carga en SpMV (CSC) con OpenMP
+
+Grupo 82, Equipo 11. Todo se ejecuta en Avignon, en la partición `stan`.
+
+## Contenido
+
+| Fichero | Qué es |
+|---|---|
+| `kernel1.c`, `kernel2.c`, `kernel3.c` | Kernels originales con medidas añadidas: tiempo del kernel y, por hilo, tiempo y fallos de lectura en L1 (apartado 4.4) |
+| `kernel2opt1.c`, `kernel3opt1.c` | Optimización 1: reparto de columnas por número de no nulos, calculado con búsqueda binaria sobre `col_ptr` |
+| `kernel2opt2.c`, `kernel3opt2.c` | Optimización 2: `schedule(dynamic, 64)` |
+| `Makefile` | Compila los 7 kernels con las opciones del enunciado (`-lm -fopenmp -O0`) |
+| `originales/` | Los kernel1, kernel2 y kernel3 del código de apoyo, sin modificar. Con ellos se midió el apartado 4.3: `cd originales && sbatch ../LanzaKernels.sh ../matriz.bin` |
+| `GeneraMatriz`, `LanzaGenerador.sh` | Generador de la matriz del equipo y su script (del código de apoyo): `sbatch LanzaGenerador.sh IdEquipo` |
+| `LanzaKernels.sh` | Ejecuta los kernels con 1, 2, 4, 8 y 16 hilos y 3 repeticiones (apartados 4.3, 4.4 y 4.5.3) |
+| `LanzaSchedules.sh` | Compara 7 políticas de reparto (`schedule`) con 4, 8 y 16 hilos (apartado 4.5.2) |
+| `LanzaEnergia.sh` | Mide la energía y la potencia del procesador con `perf` (apartado 4.5.4) |
+| `pruebas/` | Batería de pruebas de corrección (ver más abajo) |
+| `output/` | Carpeta donde los scripts guardan los resultados. Tiene que existir antes de lanzar con `sbatch`, porque Slurm escribe ahí la salida |
+
+La matriz no se incluye porque es muy grande; se genera con `LanzaGenerador.sh`.
+
+## Compilación
+
+```
+make          # compila los 7 kernels
+make clean    # borra los ejecutables
+```
+
+Los scripts de ejecución también compilan por su cuenta, con las mismas opciones, así que no hace falta ejecutar `make` antes de lanzarlos.
+
+## Ejecución
+
+Todos los comandos se lanzan desde la carpeta del proyecto. Cada trabajo tiene un límite de 10 minutos. Por eso los scripts aceptan una lista de kernels, para poder repartir las ejecuciones en varios trabajos.
+
+**Tiempos y fallos de caché** (salida en `output/kernels_<trabajo>.out`):
+```
+sbatch LanzaKernels.sh matriz.bin                          # kernel1, kernel2, kernel3
+sbatch LanzaKernels.sh matriz.bin kernel2opt1 kernel3opt1  # solo los indicados
+```
+El script imprime estas líneas, que se filtran con `grep`:
+
+| Línea | Significado |
+|---|---|
+| `PROGRAMA,kernel,hilos,segundos,rep` | Tiempo del programa entero |
+| `TIEMPO_KERNEL,kernel,hilos,segundos,rep` | Tiempo solo del kernel |
+| `HILO,kernel,hilos,id,segundos,fallos_L1,rep` | Datos de cada hilo |
+
+**Elección del schedule** (salida en `output/schedules_<trabajo>.out`):
+```
+sbatch LanzaSchedules.sh matriz.bin kernel2opt2
+sbatch LanzaSchedules.sh matriz.bin kernel3opt2
+```
+Este script cambia el reparto con la variable `OMP_SCHEDULE`, así que necesita los kernels opt2 con `schedule(runtime)`. Esa es la versión del commit anterior a fijar `schedule(dynamic, 64)`. Con la versión final todas las políticas darían el mismo resultado. Cada línea lleva el schedule al final, por ejemplo `dynamic:64`.
+
+**Energía** (salida en `output/energia_<fecha>.csv`):
+```
+bash LanzaEnergia.sh matriz.bin                   # reposo + los 7 kernels
+bash LanzaEnergia.sh matriz.bin kernel2 kernel3   # solo los indicados
+```
+Este script se lanza con `bash` y no con `sbatch`, porque desde `sbatch` hay un problema de permisos que impide leer los contadores de energía. El script pide una reserva con `salloc` para cada kernel y mide con `srun perf stat -a -e power/energy-pkg/`. La medida "reposo" (`sleep 5`) da el consumo del procesador sin hacer nada.
+
+Formato de cada línea: `ENERGIA,kernel,hilos,julios,segundos,vatios,repeticion`.
+
+## Batería de pruebas
+
+Comprueba que todas las versiones paralelas calculan el mismo vector `y` que `kernel1` (la versión secuencial), con 1, 2, 3, 4, 8 y 16 hilos:
+```
+python3 pruebas/gen_pruebas.py            # genera 7 matrices pequeñas con casos límite
+sbatch pruebas/LanzaPruebas.sh            # las prueba todas
+sbatch pruebas/LanzaPruebas.sh matriz.bin # o una matriz concreta
+```
+Los kernels no se modifican: el script crea una copia temporal que vuelca `y` a un fichero y la compara con la de `kernel1`. Se admite un error relativo de 1e-9, porque repartir la suma entre hilos cambia el orden en que se suma y eso altera los últimos decimales.
