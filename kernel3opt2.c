@@ -8,22 +8,22 @@
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #include <stdint.h>
-// definiciones de perf_event_open (struct perf_event_attr, perf_type_hw_cache...),
+// definiciones de perf_event_open (struct perf_event_attr, PERF_TYPE_HW_CACHE...),
 // necesarias para leer los contadores de fallos de cache desde el propio programa
 #include <linux/perf_event.h>
 
 
 // =================================================================
-// estructura de matriz csc y lectura
+// ESTRUCTURA DE MATRIZ CSC Y LECTURA
 // =================================================================
 
 typedef struct {
-    int M;              // numero de filas
-    int N;              // numero de columnas
-    size_t nnz;         // numero total de elementos no nulos
-    int *col_ptr;       // tamano n + 1
-    int *row_ind;       // tamano nnz
-    double *values;     // tamano nnz
+    int M;              // Número de filas
+    int N;              // Número de columnas
+    size_t nnz;         // Número total de elementos no nulos
+    int *col_ptr;       // Tamaño N + 1
+    int *row_ind;       // Tamaño nnz
+    double *values;     // Tamaño nnz
 } CSCMatrix;
 
 CSCMatrix* load_csc_matrix_bin(const char *filename) {
@@ -65,110 +65,73 @@ void free_csc_matrix(CSCMatrix *mat) {
 }
 
 
-// =================================================================
-// medicion de fallos de cache l1 con perf (por hilo)
-// =================================================================
-// el procesador tiene contadores internos que anotan eventos como "fallo en l1".
-// se usan en tres pasos, como un cuentakilometros parcial:
-//   abrir (elegir que contar) -> iniciar (poner a 0 y arrancar) -> parar (leer el valor).
-// se hace desde el codigo y no con 'perf stat' desde fuera porque desde fuera
-// solo se obtiene el total del programa, y aqui hace falta el dato de cada hilo.
+// medicion de fallos de cache L1 con perf: tres funciones que son tres pasos
+// (abrir, iniciar y parar). se hace desde el codigo y no con perf stat desde fuera
+// porque desde fuera solo se obtiene el total del programa, y aqui hace falta el de cada hilo
 
-// crea un contador de fallos de lectura en la cache l1 de datos para el hilo que
-// la llama. 'static' porque es una funcion auxiliar que solo usa este archivo.
-// devuelve el identificador del contador, o -1 si no se pudo crear.
+// abrir crea un contador de fallos para el hilo que la llama y devuelve su id,
+// o -1 si no se pudo crear
 static int perf_l1_abrir(void) {
-    // formulario que describe a linux que se quiere contar. se pone entero a 0
-    // primero porque un campo con basura puede hacer que se rechace o mida otra cosa
+    // creo la estructura del contador y la lleno de 0 para que no quede basura
     struct perf_event_attr attr;
     memset(&attr, 0, sizeof(attr));
 
-    // tipo de evento: de cache (no ciclos ni instrucciones)
+    // tipo de evento: cache
     attr.type = PERF_TYPE_HW_CACHE;
-    // linux usa el tamano para saber que version de la estructura se le pasa
+    // linux usa el tamaño para saber que version de la estructura le estamos pasando
     attr.size = sizeof(attr);
 
-    // que evento exacto: cache l1 de datos + operacion de lectura + resultado fallo.
-    // se codifican los tres en un unico numero (bits 0-7, 8-15 y 16-23), que es
-    // el formato que exige perf_event_open
-    attr.config = PERF_COUNT_HW_CACHE_L1D |
-                  (PERF_COUNT_HW_CACHE_OP_READ << 8) |
-                  (PERF_COUNT_HW_CACHE_RESULT_MISS << 16);
+    // el evento: cache L1 de datos, lectura y fallo, codificado en un unico numero
+    attr.config = PERF_COUNT_HW_CACHE_L1D |(PERF_COUNT_HW_CACHE_OP_READ << 8) |(PERF_COUNT_HW_CACHE_RESULT_MISS << 16);
 
-    // se crea parado: si contara desde ya, sumaria fallos de codigo que no es el kernel
+    // nace ya parado para que no cuente antes del kernel
     attr.disabled = 1;
 
-    // solo se cuentan los fallos de nuestro programa, no los del sistema operativo
-    // ni del hipervisor. ademas, sin ser administrador linux no deja medir esas partes
+    // solo nuestro programa, no el sistema operativo (kernel de linux) ni el hipervisor;
+    // sin ser administrador linux tampoco deja medirlos
     attr.exclude_kernel = 1;
     attr.exclude_hv = 1;
 
-    // pid = 0  -> mide al hilo que esta llamando a esta funcion. es lo que permite
-    //             que cada hilo de openmp tenga su propio contador separado.
-    // cpu = -1 -> en cualquier nucleo: si el so mueve el hilo, el contador le sigue.
-    // group_fd = -1 y flags = 0 -> contador independiente, sin opciones extra.
-    // no existe una funcion de c para esta llamada, por eso se usa syscall().
+    // pid=0: mide al hilo que llama, asi cada hilo de openmp tiene su propio contador;
+    // cpu=-1: en cualquier nucleo. se usa syscall() porque no hay funcion de C para esto
     return (int)syscall(SYS_perf_event_open, &attr, 0, -1, -1, 0);
 }
 
-// pone el contador a 0 y lo arranca justo antes de la zona que se quiere medir
+// pone el contador a 0 y lo arranca. si no se pudo abrir no hace nada:
+// se pierde la medida, no el calculo
 static void perf_l1_iniciar(int fd) {
-    // si no se pudo abrir, no se hace nada: el programa sigue y solo se pierde la medida
     if (fd < 0) return;
-    // ioctl envia ordenes al contador a traves de su identificador
     ioctl(fd, PERF_EVENT_IOC_RESET, 0);   // poner a 0
     ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);  // empezar a contar
 }
 
-// para el contador, lee cuantos fallos anoto y lo cierra.
-// devuelve long long porque los fallos pueden superar los ~2.100 millones que caben
-// en un int, y con signo para poder usar -1 como "no se pudo medir" (un 0 se
-// confundiria con "no hubo fallos")
+// para el contador, lee los fallos y lo cierra. long long porque pueden no caber en un int,
+// y -1 si no se pudo medir, para no confundirlo con 0 fallos
 static long long perf_l1_parar(int fd) {
     uint64_t fallos = 0;
     if (fd < 0) return -1;
 
-    // se para antes de leer para que no siga sumando lo que viene despues del kernel
+    // se para antes de leer para no contar nada posterior al kernel
     ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
 
-    // el contador se lee como un fichero: devuelve un entero de 64 bits.
-    // si la lectura falla se deja a 0 en vez de quedarse con un valor sin sentido
+    // se lee como un fichero: un entero de 64 bits
     if (read(fd, &fallos, sizeof(fallos)) != sizeof(fallos)) fallos = 0;
 
-    // cada contador abierto ocupa un descriptor del sistema; hay que liberarlo
     close(fd);
     return (long long)fallos;
 }
 
 
 // =================================================================
-// kernels de multiplicacion matriz-vector con medida por hilo
+// KERNELS DE MULTIPLICACIÓN MATRIZ-VECTOR CON MEDIDA POR HILO
 // =================================================================
 
-// =================================================================
-// balanceo de carga con openmp (opt2)
-// =================================================================
-// problema del original: schedule(static) da a cada hilo un trozo seguido con el
-// mismo numero de columnas, pero el coste real es el numero de no nulos de cada
-// columna; si las columnas pesadas estan juntas, un hilo se lleva casi todo.
-//
-// en opt2 el enunciado solo permite cambiar o anadir llamadas de openmp, sin
-// algoritmo propio. por eso respecto a kernel3.c solo cambia una cosa: la clausula
-// schedule del bucle de columnas. no se calculan cortes ni se usa col_ptr para
-// repartir; es openmp quien decide en tiempo de ejecucion que columnas hace cada hilo.
-//
-// la politica se eligio experimentalmente: durante las pruebas se uso
-// schedule(runtime) para variar el reparto con la variable omp_schedule sin
-// recompilar (con el script de pruebas de schedule), y la version final deja fija
-// la mas rapida.
-
-// 3. spmv openmp atomic con balanceo de openmp (opt2)
-// igual que en kernel3.c, recibe dos parametros de salida para devolver lo medido
-// por cada hilo (la medicion es la del apartado 4.4, no interviene en el reparto):
-//   t_hilo[i]      -> segundos que ha tardado el hilo i
-//   fallos_hilo[i] -> fallos de lectura en l1 del hilo i
-void spmv_csc_openmp_atomic(const CSCMatrix *mat, const double *x, double *y,
-                            double *t_hilo, long long *fallos_hilo) {
+// 3. SpMV OpenMP Atomic con balanceo de OpenMP (opt2)
+// en opt2 el enunciado solo permite cambiar o añadir llamadas de openmp, sin algoritmo
+// propio. por eso respecto a kernel3.c solo cambia la clausula schedule del bucle de
+// columnas: es openmp quien decide en tiempo de ejecucion que columnas hace cada hilo.
+// t_hilo y fallos_hilo devuelven lo que mide cada hilo, igual que en kernel3.c
+void spmv_csc_openmp_atomic(const CSCMatrix *mat, const double *x, double *y,double *t_hilo, long long *fallos_hilo) {
     int M = mat->M;
     int N = mat->N;
 
@@ -180,28 +143,24 @@ void spmv_csc_openmp_atomic(const CSCMatrix *mat, const double *x, double *y,
 
     #pragma omp parallel
     {
-        // numero de este hilo dentro del equipo (0, 1, 2...): indica en que posicion
-        // de t_hilo y fallos_hilo debe dejar sus resultados
+        // numero de este hilo (0, 1, 2...): su posicion en t_hilo y fallos_hilo
         int tid = omp_get_thread_num();
 
-        // cada hilo abre su contador. como perf_l1_abrir usa pid=0, el contador
-        // mide solo al hilo que lo abre y no se mezcla con los demas
+        // cada hilo abre su contador; con pid=0 mide solo al hilo que lo abre
         int fd = perf_l1_abrir();
         perf_l1_iniciar(fd);
 
-        // cronometro propio del hilo. omp_get_wtime mide tiempo real en segundos,
-        // que es lo que importa para ver si un hilo hace esperar a los demas
+        // cronometro propio del hilo, en tiempo real: lo que importa para ver
+        // si un hilo hace esperar a los demas
         double t_ini = omp_get_wtime();
 
-        // unico cambio respecto al original: schedule(dynamic, 64) en lugar de
-        // schedule(static). cada hilo pide un nuevo paquete de 64 columnas al terminar
-        // el anterior, de modo que los hilos que reciben columnas ligeras hacen mas
-        // paquetes y la carga se iguala sola. se eligio tras comparar static, static,64,
-        // dynamic (16, 64, 256) y guided (16, 64) con 4, 8 y 16 hilos usando
-        // schedule(runtime): dynamic,64 fue el mas rapido o a menos del 1% del mejor
-        // en todos los casos.
-        // el nowait se mantiene: cada hilo termina en cuanto no quedan paquetes,
-        // sin esperar a los demas. el atomic de cada suma no cambia
+        // unico cambio respecto al original: schedule(dynamic, 64) en vez de static.
+        // cada hilo pide un paquete de 64 columnas al acabar el anterior, asi los que
+        // reciben columnas ligeras hacen mas paquetes y la carga se iguala sola.
+        // se eligio probando static, static,64, dynamic (16, 64, 256) y guided (16, 64)
+        // con schedule(runtime) y LanzaSchedules.sh: dynamic,64 fue el mas rapido o a
+        // menos del 1% del mejor con 4, 8 y 16 hilos.
+        // nowait: el hilo que se queda sin paquetes sale sin esperar a los demas
         #pragma omp for schedule(dynamic, 64) nowait
         for (int j = 0; j < N; j++) {
             double x_j = x[j];
@@ -217,14 +176,12 @@ void spmv_csc_openmp_atomic(const CSCMatrix *mat, const double *x, double *y,
             }
         }
 
-        // gracias al 'nowait', cada hilo llega aqui en cuanto acaba sus columnas, sin
-        // esperar a los demas: su tiempo refleja solo su trabajo (y sus esperas en los
-        // 'atomic'), que es lo que permite ver si el reparto esta desequilibrado
+        // se para justo al acabar sus paquetes (no hay copia privada ni critical);
+        // el tiempo incluye el coste de los atomic
         double t_fin = omp_get_wtime();
         long long fallos = perf_l1_parar(fd);
 
-        // cada hilo escribe solo en su propia posicion [tid], asi que dos hilos
-        // nunca escriben en el mismo sitio a la vez y no hay condicion de carrera
+        // cada hilo escribe solo en su posicion [tid]: no hay condicion de carrera
         t_hilo[tid] = t_fin - t_ini;
         fallos_hilo[tid] = fallos;
 
@@ -232,7 +189,7 @@ void spmv_csc_openmp_atomic(const CSCMatrix *mat, const double *x, double *y,
 }
 
 // =================================================================
-// evaluacion de benchmark
+// EVALUACIÓN DE BENCHMARK
 // =================================================================
 
 void execute_benchmark(const char *filename) {
@@ -255,33 +212,27 @@ void execute_benchmark(const char *filename) {
         x[j] = 1.0;
     }
 
-    // 3. ejecucion openmp atomic con balanceo de openmp
+    // 3. Ejecución OpenMP Atomic con balanceo de OpenMP
 
-    // un hueco por hilo para que cada uno deje su tiempo y sus fallos.
-    // calloc (y no malloc) para que empiecen a 0: si algun hilo no llegara a
-    // ejecutarse, su linea saldria con 0 en vez de con un valor basura
+    // un hueco por hilo para su tiempo y sus fallos. calloc para que empiecen a 0
+    // y no salga basura si algun hilo no llegara a escribir
     double *t_hilo = (double*)calloc(num_threads, sizeof(double));
     long long *fallos_hilo = (long long*)calloc(num_threads, sizeof(long long));
 
-    // cronometro del kernel completo. rodea solo la llamada al kernel: la carga
-    // del fichero ya se hizo antes y no debe contar (es lo que falseaba el tiempo
-    // del programa entero en el apartado 4.3)
+    // cronometro del kernel: rodea solo la llamada, la carga del fichero no cuenta
     double t_ini = omp_get_wtime();
     spmv_csc_openmp_atomic(mat, x, y_omp, t_hilo, fallos_hilo);
     double t_fin = omp_get_wtime();
 
-    // se imprime fuera de la region paralela: si cada hilo hiciera su printf dentro,
-    // las lineas saldrian desordenadas o mezcladas entre si.
-    // formato csv con una etiqueta inicial (tiempo_kernel / hilo) para poder
-    // filtrar estas lineas con grep desde el script y llevarlas a una tabla.
-    //   tiempo_kernel,kernel,hilos,segundos
-    //   hilo,kernel,hilos,id_hilo,segundos,fallos_l1
+    // se imprime fuera de la region paralela para que las lineas no salgan mezcladas.
+    // formato csv con etiqueta para filtrarlo con grep desde el script:
+    //   TIEMPO_KERNEL,kernel,hilos,segundos
+    //   HILO,kernel,hilos,id_hilo,segundos,fallos_L1
     printf("TIEMPO_KERNEL,kernel3opt2,%d,%.6f\n", num_threads, t_fin - t_ini);
     for (int i = 0; i < num_threads; i++) {
         printf("HILO,kernel3opt2,%d,%d,%.6f,%lld\n", num_threads, i, t_hilo[i], fallos_hilo[i]);
     }
 
-    // ya impresos, los arrays de medidas no se necesitan
     free(t_hilo);
     free(fallos_hilo);
 
