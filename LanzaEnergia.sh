@@ -18,10 +18,10 @@ NUCLEOS=16
 HILOS="1 2 4 8 16"
 REPETICIONES=3
 
-# ---------------------------------------------------------------------------------
+
 # modo interno: el script se llama a si mismo dentro de la reserva de salloc.
 # va aqui arriba porque, en este modo, no debe ejecutarse nada de la parte de abajo
-# ---------------------------------------------------------------------------------
+
 if [ "$1" = "--medir" ]; then
     MATRIZ=$2
     k=$3
@@ -41,12 +41,16 @@ if [ "$1" = "--medir" ]; then
         local etiqueta=$1 h=$2 rep=$3
         shift 3
         export OMP_NUM_THREADS=$h
+        # reservo 16 nucleos; con -a mido todo el procesador, porque la energia no se puede separar por programa (como en el lab 1); -x, para una salida separada por comas
         srun -c "$NUCLEOS" perf stat -a -x, -e power/energy-pkg/,duration_time -o "$TMP" "$@" > /dev/null
+        
+        #uso awk para leer linea por linea y hago si la columna 3 tiene energy que guarde el 1 (su valor) en la e y con duration time igual entre 1 ^9 para pasar de ns a s
         awk -F, -v k="$etiqueta" -v h="$h" -v rep="$rep" '
             $3 ~ /energy-pkg/  { e = $1 }
             $3 ~ /duration_time/ { t = $1 / 1e9 }
+            #al terminar compruebo t y e , y imprimo
             END {
-                # si perf no pudo leer el contador deja el texto tal cual ("<not supported>")
+                # si perf no pudo leer la energía, en la columna 1 pone <not supported> porque no se pudo medir ni luego dividir 
                 if (e ~ /^[0-9.]+$/ && t > 0) printf "ENERGIA,%s,%s,%.3f,%.4f,%.3f,%s\n", k, h, e, t, e / t, rep
                 else printf "ENERGIA,%s,%s,%s,%s,,%s\n", k, h, e, t, rep
             }' "$TMP" | tee -a "$FICHERO"
@@ -74,9 +78,8 @@ if [ "$1" = "--medir" ]; then
     exit 0
 fi
 
-# ---------------------------------------------------------------------------------
+
 # modo normal
-# ---------------------------------------------------------------------------------
 if [ "$#" -eq 0 ]; then
     echo "Error: No se ha proporcionado ningún argumento de entrada." >&2
     echo "Uso: bash $0 nombre_matriz [kernel1 kernel2 ...]" >&2

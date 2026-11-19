@@ -36,8 +36,8 @@ fi
 # politicas a comparar:
 #   static: el reparto del original, sirve de referencia
 #   static,64 : paquetes de 64 columnas por turnos, sin coordinacion
-#   dynamic,N : >el hilo que acaba coge el siguiente paquete; varios n para ver
-#                el efecto del tamano (pequeno = mas coordinacion, grande = peor reparto)
+#   dynamic,N :el hilo que acaba coge el siguiente paquete; varios n para ver
+#              el efecto del tamano (pequeno = mas coordinacion, grande = peor reparto)
 #   guided,N : como dynamic pero con paquetes que empiezan grandes y van bajando
 SCHEDULES="static static,64 dynamic,16 dynamic,64 dynamic,256 guided,16 guided,64"
 # varios numeros de hilos para ver si la politica ganadora cambia con los hilos
