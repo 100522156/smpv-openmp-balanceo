@@ -10,9 +10,10 @@
 #SBATCH --error=./output/schedules_%j.err
 
 # pruebas para elegir el schedule de las versiones opt2 (apartado 4.5.2).
-# los kernels opt2 usan schedule(runtime), asi que el reparto lo decide la variable
-# OMP_SCHEDULE; este script ejecuta el mismo binario con varias politicas y anota
-# los resultados para quedarse con la mas rapida.
+# necesita los kernels opt2 con schedule(runtime), para que el reparto lo decida la
+# variable OMP_SCHEDULE. asi se hicieron las pruebas; en la version entregada se dejo
+# fijo schedule(dynamic, 64), que fue el ganador. para repetir la comparacion hay que
+# volver a poner schedule(runtime) a mano en kernel2opt2.c y kernel3opt2.c.
 #
 # uso:
 #   sbatch LanzaSchedules.sh matriz.bin :kernel2opt2 y kernel3opt2
