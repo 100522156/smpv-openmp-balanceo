@@ -51,7 +51,7 @@ El script imprime estas líneas, que se filtran con `grep`:
 sbatch LanzaSchedules.sh matriz.bin kernel2opt2
 sbatch LanzaSchedules.sh matriz.bin kernel3opt2
 ```
-Este script cambia el reparto con la variable `OMP_SCHEDULE`, así que necesita los kernels opt2 con `schedule(runtime)`. Esa es la versión del commit anterior a fijar `schedule(dynamic, 64)`. Con la versión final todas las políticas darían el mismo resultado. Cada línea lleva el schedule al final, por ejemplo `dynamic:64`.
+Este script se usó para elegir la política de reparto de las versiones opt2. Ejecuta el mismo binario con 7 políticas distintas cambiando la variable `OMP_SCHEDULE`. Para ello, durante las pruebas, los kernels opt2 tenían `schedule(runtime)`, que hace que OpenMP lea el reparto de esa variable al ejecutar. La política más rápida fue `dynamic,64`, y en la versión final se dejó fija en el código como `schedule(dynamic, 64)`. Con la versión entregada, `OMP_SCHEDULE` no tiene efecto y todas las políticas darían el mismo resultado. Para repetir la comparación hay que cambiar a mano, en `kernel2opt2.c` y `kernel3opt2.c`, `schedule(dynamic, 64)` por `schedule(runtime)` antes de lanzar el script. Cada línea de salida lleva el schedule al final, por ejemplo `dynamic:64`.
 
 **Energía** (salida en `output/energia_<fecha>.csv`):
 ```
