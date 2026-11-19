@@ -196,12 +196,12 @@ void execute_benchmark(const char *filename) {
     CSCMatrix *mat = load_csc_matrix_bin(filename);
     if (!mat) return;
 
-    int num_threads = omp_get_max_threads();
+    int numero_hilos = omp_get_max_threads();
 
     printf("=========================================================\n");
     printf(" Procesando: %s\n", filename);
     printf(" Dimensiones: %d x %d | NNZ: %lu\n", mat->M, mat->N, mat->nnz);
-    printf(" Hilos OpenMP disponibles: %d\n", num_threads);
+    printf(" Hilos OpenMP disponibles: %d\n", numero_hilos);
     printf("=========================================================\n");
 
     double *x = (double*)malloc(mat->N * sizeof(double));
@@ -216,8 +216,8 @@ void execute_benchmark(const char *filename) {
 
     // un hueco por hilo para su tiempo y sus fallos. calloc para que empiecen a 0
     // y no salga basura si algun hilo no llegara a escribir
-    double *t_hilo = (double*)calloc(num_threads, sizeof(double));
-    long long *fallos_hilo = (long long*)calloc(num_threads, sizeof(long long));
+    double *t_hilo = (double*)calloc(numero_hilos, sizeof(double));
+    long long *fallos_hilo = (long long*)calloc(numero_hilos, sizeof(long long));
 
     // cronometro del kernel: rodea solo la llamada, la carga del fichero no cuenta
     double t_ini = omp_get_wtime();
@@ -228,9 +228,9 @@ void execute_benchmark(const char *filename) {
     // formato csv con etiqueta para filtrarlo con grep desde el script:
     //   TIEMPO_KERNEL,kernel,hilos,segundos
     //   HILO,kernel,hilos,id_hilo,segundos,fallos_L1
-    printf("TIEMPO_KERNEL,kernel3opt2,%d,%.6f\n", num_threads, t_fin - t_ini);
-    for (int i = 0; i < num_threads; i++) {
-        printf("HILO,kernel3opt2,%d,%d,%.6f,%lld\n", num_threads, i, t_hilo[i], fallos_hilo[i]);
+    printf("TIEMPO_KERNEL,kernel3opt2,%d,%.6f\n", numero_hilos, t_fin - t_ini);
+    for (int i = 0; i < numero_hilos; i++) {
+        printf("HILO,kernel3opt2,%d,%d,%.6f,%lld\n", numero_hilos, i, t_hilo[i], fallos_hilo[i]);
     }
 
     free(t_hilo);

@@ -6,8 +6,8 @@
 # impide leer los contadores de energia; con salloc + srun si se puede medir.
 #
 # uso:
-#   bash LanzaEnergia.sh matriz.bin                      -> reposo + los 7 kernels
-#   bash LanzaEnergia.sh matriz.bin kernel2opt1 kernel3  -> solo los indicados
+#   bash LanzaEnergia.sh matriz.bin :reposo + los 7 kernels
+#   bash LanzaEnergia.sh matriz.bin kernel2opt1 kernel3:solo los indicados
 #
 # para cada kernel pide una reserva en stan (salloc) y dentro ejecuta todas sus
 # combinaciones de hilos y repeticiones con srun + perf stat. se reserva una vez por
