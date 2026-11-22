@@ -10,10 +10,10 @@
 #SBATCH --error=./output/kernels_%j.err
 
 # Uso:
-#   sbatch LanzaKernels.sh matriz.bin                   -> ejecuta kernel1, kernel2 y kernel3
-#   sbatch LanzaKernels.sh matriz.bin kernel2 kernel3   -> solo los kernels indicados
+#   sbatch LanzaKernels.sh matriz.bin:ejecuta kernel1, kernel2 y kernel3
+#   sbatch LanzaKernels.sh matriz.bin kernel2 kernel3 : solo los kernels indicados
 # Elegir kernels permite repartir las ejecuciones en varios trabajos si una sola
-# tanda no cabe en el límite de 10 minutos por trabajo.
+# tanda no cabe en el limite de 10 minutos por trabajo.
 
 if [ "$#" -eq 0 ]; then
     echo "Error: No se ha proporcionado ningún argumento de entrada." >&2
@@ -22,7 +22,7 @@ if [ "$#" -eq 0 ]; then
 fi
 
 MATRIZ=$1
-shift
+shift # borro el argumento de la lista , pero ya he copiado el valor del primer argumento en matriz
 # Si no se indica ningún kernel, se ejecutan los tres originales
 if [ "$#" -eq 0 ]; then
     KERNELS="kernel1 kernel2 kernel3"
@@ -30,7 +30,8 @@ else
     KERNELS="$*"
 fi
 
-# Varias repeticiones porque el nodo es compartido y una sola medida puede salir alterada
+# varias repeticiones porque el nodo es compartido y una sola medida puede salir alterada
+
 REPETICIONES=3
 HILOS="1 2 4 8 16"
 
@@ -46,29 +47,30 @@ gcc -o kernel3opt1 kernel3opt1.c -lm -fopenmp -O0
 gcc -o kernel2opt2 kernel2opt2.c -lm -fopenmp -O0
 gcc -o kernel3opt2 kernel3opt2.c -lm -fopenmp -O0
 
-# Que bash imprima solo los segundos reales del programa completo
+# hago que time solo muestre el tiempo real en segundos del programa
 TIMEFORMAT="%R"
 
 # Fichero temporal donde se guarda la salida de cada ejecución para poder filtrarla.
-# Se borra al terminar el script, acabe bien o mal
+# se borra con trap al terminar el script, acabe bien o mal
 SALIDA=$(mktemp)
 trap 'rm -f "$SALIDA" "$SALIDA.err"' EXIT
 
 # Ejecuta un kernel una vez e imprime sus medidas.
-#   $1 = nombre del kernel, $2 = número de hilos, $3 = número de repetición
+# $1 = nombre del kernel, $2 = número de hilos, $3 = número de repetición
 # Se imprimen tres tipos de línea, todas con la repetición al final:
-#   PROGRAMA,kernel,hilos,segundos,rep            -> tiempo del programa entero (apartado 4.3)
-#   TIEMPO_KERNEL,kernel,hilos,segundos,rep       -> tiempo solo del kernel (apartado 4.4)
-#   HILO,kernel,hilos,id,segundos,fallos_L1,rep   -> datos de cada hilo (apartado 4.4)
+#   PROGRAMA,kernel,hilos,segundos,rep :tiempo del programa entero (apartado 4.3)
+#   TIEMPO_KERNEL,kernel,hilos,segundos,rep :tiempo solo del kernel (apartado 4.4)
+#   HILO,kernel,hilos,id,segundos,fallos_L1,rep : datos de cada hilo (apartado 4.4)
 ejecutar() {
     local k=$1 h=$2 rep=$3
-    export OMP_NUM_THREADS=$h
+    export OMP_NUM_THREADS=$h #para decirle a open cuantos hilos usare
     # La salida del programa va al fichero temporal y sus errores a otro, para que
-    # no se mezclen con el número que devuelve 'time'
-    local t
+    # no se mezclen con el numero que devuelve 'time'
+    local t #como variable solo de la funcion
+    #ejecuto el kernel con la matriz y guardo lo q me da el kernel(el tiempo del kernel y del hilo)
     t=$( { time ./"$k" "$MATRIZ" > "$SALIDA" 2> "$SALIDA.err"; } 2>&1 )
     echo "PROGRAMA,$k,$h,$t,$rep"
-    # Solo interesan las líneas de medidas; el resto (cabecera "Procesando...") se descarta
+    # solo me interesan las lineas de medidas;uso tubarie para pasarselo a sed y cambiar el final de la linea $ por el numero de la repetcicion
     grep -E '^(TIEMPO_KERNEL|HILO),' "$SALIDA" | sed "s/\$/,$rep/"
     # Los avisos del programa (por ejemplo, si perf falla) se pasan al .err del trabajo
     cat "$SALIDA.err" >&2
@@ -76,11 +78,12 @@ ejecutar() {
 
 for k in $KERNELS; do
     if [ "$k" = "kernel1" ]; then
-        # kernel1 es secuencial: repetirlo con más hilos no cambiaría nada
+        # kernel1 es secuencial, asi q no lo repito con mas hilos, solo lo hago 3 veces
         for rep in $(seq 1 $REPETICIONES); do
             ejecutar "$k" 1 "$rep"
         done
     else
+        #cuando son los pareelos hago cada hilo 3 veces
         for h in $HILOS; do
             for rep in $(seq 1 $REPETICIONES); do
                 ejecutar "$k" "$h" "$rep"

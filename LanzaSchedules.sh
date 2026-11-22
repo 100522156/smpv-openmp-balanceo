@@ -41,11 +41,12 @@ fi
 #              el efecto del tamano (pequeno = mas coordinacion, grande = peor reparto)
 #   guided,N : como dynamic pero con paquetes que empiezan grandes y van bajando
 SCHEDULES="static static,64 dynamic,16 dynamic,64 dynamic,256 guided,16 guided,64"
-# varios numeros de hilos para ver si la politica ganadora cambia con los hilos
+# varios numeros de hilos para ver si la politica ganadora cambia con los hilos, no uso 1 hilo porqe no tiene sentido el schedule y con 2 hilos el desquilibrio seraia pequeño
+#se ve mejor con varios hilos
 HILOS="4 8 16"
 # varias repeticiones porque el nodo es compartido y una sola medida puede salir alterada
 REPETICIONES=3
-
+#esta sera la linea que vere en el out 
 echo "Nodo: $(hostname) | Trabajo: $SLURM_JOB_ID | Matriz: $MATRIZ | Kernels: $KERNELS"
 
 # no modificar la compilacion de los archivos (lo exige el enunciado)
@@ -64,10 +65,11 @@ trap 'rm -f "$SALIDA" "$SALIDA.err"' EXIT
 # a cada linea se le anade al final la repeticion y el schedule. en el schedule la
 # coma se cambia por ':' (dynamic:64) para que no rompa las columnas del csv
 ejecutar() {
+    #se recibe la politica como 4 dato 
     local k=$1 h=$2 rep=$3 sched=$4
     export OMP_NUM_THREADS=$h
     export OMP_SCHEDULE=$sched
-    local etiqueta=${sched/,/:}
+    local etiqueta=${sched/,/:}#uso esto para cambiar la coma por dos puntos,lo hago solo para que en el csv del out no se separe en columnas distintas
     local t
     t=$( { time ./"$k" "$MATRIZ" > "$SALIDA" 2> "$SALIDA.err"; } 2>&1 )
     echo "PROGRAMA,$k,$h,$t,$rep,$etiqueta"
