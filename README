@@ -47,9 +47,9 @@ El script imprime estas líneas, que se filtran con `grep`:
 | `HILO,kernel,hilos,id,segundos,fallos_L1,rep` | Datos de cada hilo |
 
 **Kernels originales (apartado 4.3)**:
-
+```
 cd originales && sbatch ../LanzaKernels.sh ../matriz.bin
-
+```
 `LanzaKernels.sh` compila siempre los 7 kernels. En `originales/` solo están kernel1, kernel2 y kernel3, así que en `originales/output/kernels_<trabajo>.err` aparecen cuatro errores `fatal error: kernelXoptY.c: No such file or directory`. Son normales y no afectan a las medidas: esos kernels no se ejecutan en este caso, solo los tres originales.
 
 **Elección del schedule** (salida en `output/schedules_<trabajo>.out`):
